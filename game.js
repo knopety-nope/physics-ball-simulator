@@ -1,17 +1,20 @@
-// Physics Ball Simulator - Multi-Ball Edition
+// Physics Ball Simulator - Multi-Ball Edition with Replay
 // Using Three.js for 3D rendering and Cannon.js for physics
 
 // Global variables
 let scene, camera, renderer, world;
-let balls = []; // Array to store all ball objects
+let balls = [];
 let groundMesh, groundBody;
 let platformMesh, platformBody;
 let isDropping = false;
 let isPaused = false;
+let isReplaying = false;
 let startTime = 0;
 let animationId = null;
+let replaySpeed = 1.0;
+let trajectoryData = []; // Store ball positions for replay
 
-// Ball properties database - expanded with more types
+// Ball properties database
 const ballProperties = {
     tennis: { mass: 0.058, radius: 0.033, bounciness: 0.70, drag: 0.0003, color: 0xCCFF00, name: 'Tennis Ball' },
     basketball: { mass: 0.62, radius: 0.12, bounciness: 0.75, drag: 0.0005, color: 0xFF6600, name: 'Basketball' },
@@ -26,7 +29,7 @@ const ballProperties = {
     steel: { mass: 3.5, radius: 0.05, bounciness: 0.35, drag: 0.0001, color: 0x808080, name: 'Steel Ball' }
 };
 
-// Ball class to track individual ball state
+// Ball class
 class Ball {
     constructor(type, height, xOffset) {
         this.type = type;
@@ -41,7 +44,6 @@ class Ball {
         this.totalDistance = 0;
         this.lastY = height + this.props.radius;
         this.impactVelocity = 0;
-        this.startTime = Date.now();
         this.hasLanded = false;
         this.firstBounceHeight = 0;
         this.landedTime = 0;
@@ -58,24 +60,20 @@ function init() {
     
     console.log('Container size:', width, 'x', height);
 
-    // Three.js scene setup
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87CEEB);
     scene.fog = new THREE.Fog(0x87CEEB, 50, 200);
 
-    // Camera setup - closer view for better visibility
     camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 500);
     camera.position.set(0, 25, 45);
     camera.lookAt(0, 10, 0);
 
-    // Renderer setup
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(width, height);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
 
-    // Lighting
     const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
     scene.add(ambientLight);
 
@@ -86,7 +84,6 @@ function init() {
     directionalLight.shadow.mapSize.height = 2048;
     scene.add(directionalLight);
 
-    // Cannon.js physics world
     world = new CANNON.World();
     world.gravity.set(0, -9.81, 0);
     world.broadphase = new CANNON.NaiveBroadphase();
@@ -101,7 +98,6 @@ function init() {
     animate();
 }
 
-// Create ground
 function createGround() {
     const groundShape = new CANNON.Plane();
     groundBody = new CANNON.Body({ mass: 0 });
@@ -123,14 +119,9 @@ function createGround() {
     scene.add(gridHelper);
 }
 
-// Create platform at specified height
 function createPlatform(height) {
-    if (platformBody) {
-        world.removeBody(platformBody);
-    }
-    if (platformMesh) {
-        scene.remove(platformMesh);
-    }
+    if (platformBody) world.removeBody(platformBody);
+    if (platformMesh) scene.remove(platformMesh);
 
     const platformShape = new CANNON.Box(new CANNON.Vec3(6, 0.5, 6));
     platformBody = new CANNON.Body({ mass: 0 });
@@ -147,12 +138,10 @@ function createPlatform(height) {
     scene.add(platformMesh);
 }
 
-// Create a single ball
 function createBall(ball) {
     const props = ball.props;
     const xPos = ball.xOffset;
 
-    // Cannon.js ball body
     const ballShape = new CANNON.Sphere(props.radius);
     ball.body = new CANNON.Body({ 
         mass: props.mass,
@@ -165,7 +154,6 @@ function createBall(ball) {
     ball.body.friction = 0.3;
     world.addBody(ball.body);
 
-    // Three.js ball mesh
     const ballGeometry = new THREE.SphereGeometry(props.radius, 32, 32);
     const ballMaterial = new THREE.MeshStandardMaterial({ 
         color: props.color,
@@ -180,7 +168,6 @@ function createBall(ball) {
     console.log(`Created ${props.name} at (${xPos}, ${ball.height + props.radius})`);
 }
 
-// Clear all balls
 function clearAllBalls() {
     balls.forEach(ball => {
         if (ball.body) {
@@ -197,7 +184,6 @@ function clearAllBalls() {
     balls = [];
 }
 
-// Add trail point for a ball
 function addTrailPoint(ball) {
     if (!document.getElementById('show-trail').checked) return;
     
@@ -218,7 +204,6 @@ function addTrailPoint(ball) {
     }
 }
 
-// Calculate air density
 function getAirDensity(temp, humidity, pressure) {
     const tempK = temp + 273.15;
     const vaporPressure = humidity / 100 * 6.112 * Math.exp((17.67 * temp) / (temp + 243.5));
@@ -226,9 +211,8 @@ function getAirDensity(temp, humidity, pressure) {
     return (dryPressure / (287.05 * tempK)) + (vaporPressure / (461.5 * tempK));
 }
 
-// Apply weather forces to all balls
 function applyWeatherForces() {
-    if (!isDropping) return;
+    if (!isDropping && !isReplaying) return;
 
     const temp = parseFloat(document.getElementById('temperature').value);
     const windSpeed = parseFloat(document.getElementById('wind-speed').value);
@@ -259,13 +243,21 @@ function applyWeatherForces() {
     });
 }
 
-// Check if all balls have landed
 function allBallsLanded() {
     if (balls.length === 0) return false;
     return balls.every(ball => ball.hasLanded);
 }
 
-// Update statistics for all balls
+function recordTrajectory() {
+    const frame = balls.map(ball => ({
+        type: ball.type,
+        position: { x: ball.body.position.x, y: ball.body.position.y, z: ball.body.position.z },
+        quaternion: { x: ball.body.quaternion.x, y: ball.body.quaternion.y, z: ball.body.quaternion.z, w: ball.body.quaternion.w },
+        hasLanded: ball.hasLanded
+    }));
+    trajectoryData.push(frame);
+}
+
 function updateStats() {
     const allLanded = allBallsLanded();
     
@@ -275,16 +267,13 @@ function updateStats() {
         const currentY = ball.body.position.y;
         const radius = ball.props.radius;
 
-        // Track max height
         if (currentY > ball.maxHeight) {
             ball.maxHeight = currentY;
         }
 
-        // Track distance
         ball.totalDistance += Math.abs(currentY - ball.lastY);
         ball.lastY = currentY;
 
-        // Detect bounces
         if (currentY <= radius + 0.1 && Math.abs(ball.body.velocity.y) > 0.5) {
             ball.bounceCount++;
             if (ball.bounceCount === 1) {
@@ -292,12 +281,10 @@ function updateStats() {
             }
         }
 
-        // Track impact velocity
         if (currentY <= radius + 1) {
             ball.impactVelocity = Math.abs(ball.body.velocity.y);
         }
 
-        // Mark as landed when ball stops moving near ground
         if (currentY <= radius + 0.05 && Math.abs(ball.body.velocity.y) < 0.1 && !ball.hasLanded) {
             ball.hasLanded = true;
             ball.landedTime = Date.now();
@@ -305,17 +292,16 @@ function updateStats() {
         }
     });
 
-    // Stop simulation when all balls have landed
     if (allLanded && isDropping) {
         isDropping = false;
         console.log('All balls landed - simulation stopped');
+        document.getElementById('replay-btn').disabled = false;
     }
 
     renderStats();
     renderComparison();
 }
 
-// Render statistics panel
 function renderStats() {
     const statsContent = document.getElementById('stats-content');
     if (balls.length === 0) {
@@ -324,12 +310,11 @@ function renderStats() {
     }
 
     let html = '';
-    // Calculate fall time - stop counting when ball lands
     const fallTime = balls.some(b => !b.hasLanded) 
         ? ((Date.now() - startTime) / 1000).toFixed(2) 
-        : ((balls[0].landedTime || Date.now()) - startTime) / 1000).toFixed(2);
+        : (((balls[0].landedTime || Date.now()) - startTime) / 1000).toFixed(2);
 
-    balls.forEach((ball, index) => {
+    balls.forEach((ball) => {
         const color = '#' + ball.props.color.toString(16).padStart(6, '0');
         const ballFallTime = ball.hasLanded 
             ? ((ball.landedTime - startTime) / 1000).toFixed(2)
@@ -350,7 +335,6 @@ function renderStats() {
     statsContent.innerHTML = html;
 }
 
-// Render comparison table
 function renderComparison() {
     const comparisonContent = document.getElementById('comparison-content');
     if (balls.length < 2) {
@@ -358,7 +342,6 @@ function renderComparison() {
         return;
     }
 
-    // Find winners
     let highestBounce = { ball: null, value: 0 };
     let mostBounces = { ball: null, value: 0 };
 
@@ -395,11 +378,27 @@ function renderComparison() {
     comparisonContent.innerHTML = html;
 }
 
-// Animation loop
 function animate() {
     animationId = requestAnimationFrame(animate);
 
-    if (!isPaused && isDropping) {
+    if (isReplaying && trajectoryData.length > 0) {
+        const replayFrame = trajectoryData[Math.min(replayIndex, trajectoryData.length - 1)];
+        if (replayFrame) {
+            replayFrame.forEach((frameData, idx) => {
+                if (balls[idx] && balls[idx].mesh) {
+                    balls[idx].mesh.position.set(frameData.position.x, frameData.position.y, frameData.position.z);
+                    balls[idx].mesh.quaternion.set(frameData.quaternion.x, frameData.quaternion.y, frameData.quaternion.z, frameData.quaternion.w);
+                }
+            });
+        }
+        replayIndex += replaySpeed;
+        if (replayIndex >= trajectoryData.length) {
+            isReplaying = false;
+            replayIndex = 0;
+            document.getElementById('replay-btn').textContent = '🎬 Replay (' + replaySpeed + 'x)';
+            document.getElementById('replay-btn').disabled = false;
+        }
+    } else if (!isPaused && isDropping) {
         world.step(1 / 60);
         applyWeatherForces();
 
@@ -407,7 +406,7 @@ function animate() {
             if (ball.mesh && ball.body && !ball.hasLanded) {
                 ball.mesh.position.copy(ball.body.position);
                 ball.mesh.quaternion.copy(ball.body.quaternion);
-
+                recordTrajectory();
                 if (balls.length % 5 === 0) {
                     addTrailPoint(ball);
                 }
@@ -420,7 +419,8 @@ function animate() {
     renderer.render(scene, camera);
 }
 
-// Setup event listeners
+let replayIndex = 0;
+
 function setupEventListeners() {
     console.log('Setting up event listeners...');
 
@@ -444,10 +444,41 @@ function setupEventListeners() {
         }
     });
 
+    // Replay speed control
+    const speedSlider = document.getElementById('replay-speed');
+    const speedValue = document.getElementById('speed-value');
+    speedSlider.addEventListener('input', (e) => {
+        replaySpeed = parseFloat(e.target.value);
+        speedValue.textContent = replaySpeed.toFixed(1);
+        document.getElementById('replay-btn').textContent = '🎬 Replay (' + replaySpeed + 'x)';
+        // Update active button
+        document.querySelectorAll('.speed-btn').forEach(btn => {
+            btn.classList.toggle('active', parseFloat(btn.dataset.speed) === replaySpeed);
+        });
+    });
+
+    // Speed preset buttons
+    document.querySelectorAll('.speed-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const speed = parseFloat(btn.dataset.speed);
+            replaySpeed = speed;
+            speedSlider.value = speed;
+            speedValue.textContent = speed.toFixed(1);
+            document.getElementById('replay-btn').textContent = '🎬 Replay (' + speed + 'x)';
+            document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+
     const dropBtn = document.getElementById('drop-btn');
     console.log('Drop button found:', dropBtn !== null);
     if (dropBtn) {
         dropBtn.addEventListener('click', dropBalls);
+    }
+
+    const replayBtn = document.getElementById('replay-btn');
+    if (replayBtn) {
+        replayBtn.addEventListener('click', startReplay);
     }
 
     document.getElementById('reset-btn').addEventListener('click', resetSimulation);
@@ -457,7 +488,18 @@ function setupEventListeners() {
     console.log('Event listeners setup complete!');
 }
 
-// Update ball info display
+function startReplay() {
+    if (trajectoryData.length === 0 || balls.length === 0) return;
+    
+    isReplaying = true;
+    isDropping = false;
+    isPaused = false;
+    replayIndex = 0;
+    document.getElementById('replay-btn').disabled = true;
+    document.getElementById('replay-btn').textContent = '🎬 Playing...';
+    console.log('Starting replay at', replaySpeed, 'x speed');
+}
+
 function updateBallInfo() {
     const select = document.getElementById('ball-type');
     const selectedOptions = Array.from(select.selectedOptions);
@@ -476,7 +518,6 @@ function updateBallInfo() {
     }
 }
 
-// Get current height
 function getCurrentHeight() {
     const heightType = document.getElementById('height-type').value;
     if (heightType === 'custom') {
@@ -485,12 +526,11 @@ function getCurrentHeight() {
     return parseFloat(heightType);
 }
 
-// Drop all selected balls
 function dropBalls() {
     console.log('dropBalls() called, isDropping:', isDropping);
     
-    if (isDropping) {
-        console.log('Already dropping, returning');
+    if (isDropping || isReplaying) {
+        console.log('Already dropping or replaying, returning');
         return;
     }
 
@@ -505,8 +545,8 @@ function dropBalls() {
     const height = getCurrentHeight();
     console.log('Dropping', selectedOptions.length, 'balls from', height, 'm');
 
-    // Reset and create balls with offsets for visual separation
     clearAllBalls();
+    trajectoryData = [];
     
     const totalBalls = selectedOptions.length;
     const spacing = Math.min(1.5, 8 / totalBalls);
@@ -521,16 +561,21 @@ function dropBalls() {
 
     startTime = Date.now();
     isDropping = true;
+    document.getElementById('replay-btn').disabled = true;
     console.log('Ball drop started!', balls.length, 'balls');
 }
 
-// Reset simulation
 function resetSimulation() {
     isDropping = false;
+    isReplaying = false;
     isPaused = false;
     document.getElementById('pause-btn').textContent = '⏸️ Pause';
+    document.getElementById('replay-btn').disabled = true;
+    document.getElementById('replay-btn').textContent = '🎬 Replay (1x)';
 
     clearAllBalls();
+    trajectoryData = [];
+    replayIndex = 0;
 
     document.getElementById('stats-content').innerHTML = '<p class="hint">Drop balls to see statistics</p>';
     document.getElementById('comparison-content').innerHTML = '<p class="hint">Select multiple balls to compare</p>';
@@ -538,14 +583,13 @@ function resetSimulation() {
     console.log('Simulation reset!');
 }
 
-// Toggle pause
 function togglePause() {
+    if (isReplaying) return;
     isPaused = !isPaused;
     document.getElementById('pause-btn').textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
     console.log('Pause toggled:', isPaused);
 }
 
-// Window resize handler
 function onWindowResize() {
     const container = document.getElementById('canvas-container');
     const width = container.clientWidth;
@@ -556,5 +600,4 @@ function onWindowResize() {
     renderer.setSize(width, height);
 }
 
-// Initialize on load
 window.addEventListener('load', init);
