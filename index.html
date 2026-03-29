@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Physics Ball Simulator 🎮</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="game-container">
+        <div id="canvas-container"></div>
+        
+        <!-- Control Panel -->
+        <div id="control-panel">
+            <h2>🎮 Physics Ball Simulator</h2>
+            
+            <!-- Ball Selection -->
+            <div class="control-section">
+                <h3>⚽ Ball Type</h3>
+                <select id="ball-type">
+                    <option value="tennis">Tennis Ball</option>
+                    <option value="basketball">Basketball</option>
+                    <option value="soccer">Soccer Ball</option>
+                    <option value="bowling">Bowling Ball</option>
+                    <option value="golf">Golf Ball</option>
+                    <option value="rubber">Rubber Ball</option>
+                    <option value="steel">Steel Ball</option>
+                </select>
+                <div id="ball-info" class="info-box"></div>
+            </div>
+            
+            <!-- Height Selection -->
+            <div class="control-section">
+                <h3>🏢 Drop Height</h3>
+                <select id="height-type">
+                    <option value="10">Balcony (10m)</option>
+                    <option value="30">Building (30m)</option>
+                    <option value="50">High Building (50m)</option>
+                    <option value="100">Skyscraper (100m)</option>
+                    <option value="200">Bridge (200m)</option>
+                    <option value="350">Tower (350m)</option>
+                    <option value="custom">Custom Height</option>
+                </select>
+                <input type="number" id="custom-height" placeholder="Height (m)" min="1" max="1000" style="display:none;">
+            </div>
+            
+            <!-- Weather Controls -->
+            <div class="control-section">
+                <h3>🌤️ Weather Conditions</h3>
+                <label>Temperature: <span id="temp-value">20</span>°C</label>
+                <input type="range" id="temperature" min="-20" max="50" value="20">
+                
+                <label>Wind Speed: <span id="wind-value">0</span> m/s</label>
+                <input type="range" id="wind-speed" min="0" max="30" value="0">
+                
+                <label>Wind Direction: <span id="wind-dir-value">0</span>°</label>
+                <input type="range" id="wind-direction" min="0" max="360" value="0">
+                
+                <label>Humidity: <span id="humidity-value">50</span>%</label>
+                <input type="range" id="humidity" min="0" max="100" value="50">
+                
+                <label>Air Pressure: <span id="pressure-value">1013</span> hPa</label>
+                <input type="range" id="pressure" min="900" max="1100" value="1013">
+            </div>
+            
+            <!-- Physics Settings -->
+            <div class="control-section">
+                <h3>⚙️ Physics Settings</h3>
+                <label>
+                    <input type="checkbox" id="show-trail" checked> Show Trail
+                </label>
+                <label>
+                    <input type="checkbox" id="realistic-physics" checked> Realistic Physics
+                </label>
+                <label>
+                    <input type="checkbox" id="air-resistance" checked> Air Resistance
+                </label>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="control-section">
+                <button id="drop-btn" class="action-btn">🚀 Drop Ball</button>
+                <button id="reset-btn" class="action-btn">🔄 Reset</button>
+                <button id="pause-btn" class="action-btn">⏸️ Pause</button>
+            </div>
+        </div>
+        
+        <!-- Statistics Panel -->
+        <div id="stats-panel">
+            <h3>📊 Statistics</h3>
+            <div class="stat-row">
+                <span>Drop Height:</span>
+                <span id="stat-height">0 m</span>
+            </div>
+            <div class="stat-row">
+                <span>Fall Time:</span>
+                <span id="stat-fall-time">0.00 s</span>
+            </div>
+            <div class="stat-row">
+                <span>Max Bounce Height:</span>
+                <span id="stat-bounce-height">0 m</span>
+            </div>
+            <div class="stat-row">
+                <span>Impact Velocity:</span>
+                <span id="stat-impact-velocity">0 m/s</span>
+            </div>
+            <div class="stat-row">
+                <span>Bounce Count:</span>
+                <span id="stat-bounce-count">0</span>
+            </div>
+            <div class="stat-row">
+                <span>Total Distance:</span>
+                <span id="stat-total-distance">0 m</span>
+            </div>
+            <div class="stat-row">
+                <span>Energy Loss:</span>
+                <span id="stat-energy-loss">0%</span>
+            </div>
+        </div>
+        
+        <!-- Ball Info Panel -->
+        <div id="ball-properties">
+            <h3>⚽ Ball Properties</h3>
+            <div class="prop-row">
+                <span>Mass:</span>
+                <span id="prop-mass">0 kg</span>
+            </div>
+            <div class="prop-row">
+                <span>Radius:</span>
+                <span id="prop-radius">0 m</span>
+            </div>
+            <div class="prop-row">
+                <span>Bounciness:</span>
+                <span id="prop-bounciness">0</span>
+            </div>
+            <div class="prop-row">
+                <span>Drag Coefficient:</span>
+                <span id="prop-drag">0</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Three.js and Cannon.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
