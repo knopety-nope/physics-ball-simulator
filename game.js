@@ -15,6 +15,11 @@ let replaySpeed = 1.0;
 let trajectoryData = [];
 let replayIndex = 0;
 
+// Camera tracking
+let cameraTargetY = 25;
+let cameraTargetZ = 45;
+const cameraLerpFactor = 0.05; // Smooth camera movement
+
 // Ball properties database
 const ballProperties = {
     tennis: { mass: 0.058, radius: 0.033, bounciness: 0.70, drag: 0.0003, color: 0xCCFF00, name: 'Tennis Ball' },
@@ -184,6 +189,9 @@ function clearAllBalls() {
         ball.trailPoints = [];
     });
     balls = [];
+    // Reset camera target
+    cameraTargetY = 25;
+    cameraTargetZ = 45;
 }
 
 function addTrailPoint(ball) {
@@ -258,6 +266,49 @@ function recordTrajectory() {
         hasLanded: ball.hasLanded
     }));
     trajectoryData.push(frame);
+}
+
+// Update camera to follow falling balls
+function updateCamera() {
+    if (!isDropping || balls.length === 0) return;
+    
+    // Find the lowest ball (the one closest to ground)
+    let lowestY = Infinity;
+    let highestY = -Infinity;
+    let centerX = 0;
+    
+    balls.forEach(ball => {
+        if (ball.body && !ball.hasLanded) {
+            const y = ball.body.position.y;
+            if (y < lowestY) lowestY = y;
+            if (y > highestY) highestY = y;
+            centerX += ball.body.position.x;
+        }
+    });
+    
+    centerX = balls.length > 0 ? centerX / balls.length : 0;
+    
+    // Calculate target camera position
+    // Keep camera focused on the action - follow the lowest ball but keep some margin
+    const spread = highestY - lowestY;
+    const margin = Math.max(10, spread * 1.5); // Keep all balls in view with margin
+    
+    // Target Y is between the balls, slightly above center
+    const targetCenterY = (lowestY + highestY) / 2 + margin * 0.3;
+    cameraTargetY = Math.max(targetCenterY, 15); // Don't go below 15
+    
+    // Target Z adjusts based on ball spread - zoom out if balls are spread apart
+    cameraTargetZ = 45 + spread * 0.5;
+    cameraTargetZ = Math.min(Math.max(cameraTargetZ, 30), 80); // Clamp between 30 and 80
+    
+    // Smooth camera movement using lerp
+    camera.position.y += (cameraTargetY - camera.position.y) * cameraLerpFactor;
+    camera.position.z += (cameraTargetZ - camera.position.z) * cameraLerpFactor;
+    camera.position.x += (centerX - camera.position.x) * cameraLerpFactor;
+    
+    // Camera looks at a point slightly below the center of the balls
+    const lookAtY = Math.max(lowestY - 5, 0);
+    camera.lookAt(centerX, lookAtY, 0);
 }
 
 function updateStats() {
@@ -434,6 +485,9 @@ function animate() {
             }
         });
 
+        // Update camera to follow falling balls
+        updateCamera();
+
         updateStats();
     }
 
@@ -579,6 +633,11 @@ function dropBalls() {
 
     startTime = Date.now();
     isDropping = true;
+    // Reset camera position
+    cameraTargetY = height / 2 + 10;
+    cameraTargetZ = 45 + height * 0.1;
+    camera.position.set(0, cameraTargetY, cameraTargetZ);
+    camera.lookAt(0, height / 2, 0);
     document.getElementById('replay-btn').disabled = true;
     console.log('Ball drop started!', balls.length, 'balls');
 }
