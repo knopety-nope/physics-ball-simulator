@@ -12,7 +12,8 @@ let isReplaying = false;
 let startTime = 0;
 let animationId = null;
 let replaySpeed = 1.0;
-let trajectoryData = []; // Store ball positions for replay
+let trajectoryData = [];
+let replayIndex = 0;
 
 // Ball properties database
 const ballProperties = {
@@ -47,6 +48,7 @@ class Ball {
         this.hasLanded = false;
         this.firstBounceHeight = 0;
         this.landedTime = 0;
+        this.framesNearGround = 0;
     }
 }
 
@@ -266,32 +268,51 @@ function updateStats() {
 
         const currentY = ball.body.position.y;
         const radius = ball.props.radius;
+        const velocity = ball.body.velocity;
 
+        // Track max height
         if (currentY > ball.maxHeight) {
             ball.maxHeight = currentY;
         }
 
+        // Track distance
         ball.totalDistance += Math.abs(currentY - ball.lastY);
         ball.lastY = currentY;
 
-        if (currentY <= radius + 0.1 && Math.abs(ball.body.velocity.y) > 0.5) {
+        // Detect bounces
+        if (currentY <= radius + 0.15 && Math.abs(velocity.y) > 0.8) {
             ball.bounceCount++;
             if (ball.bounceCount === 1) {
                 ball.firstBounceHeight = ball.maxHeight;
             }
         }
 
+        // Track impact velocity
         if (currentY <= radius + 1) {
-            ball.impactVelocity = Math.abs(ball.body.velocity.y);
+            ball.impactVelocity = Math.abs(velocity.y);
         }
 
-        if (currentY <= radius + 0.05 && Math.abs(ball.body.velocity.y) < 0.1 && !ball.hasLanded) {
-            ball.hasLanded = true;
-            ball.landedTime = Date.now();
-            console.log(`${ball.props.name} landed!`);
+        // Improved landing detection - ball near ground with low velocity for multiple frames
+        const isNearGround = currentY <= radius + 0.15;
+        const isVerticalSlow = Math.abs(velocity.y) < 0.5;
+        const isHorizontalSlow = Math.abs(velocity.x) < 0.3 && Math.abs(velocity.z) < 0.3;
+        
+        if (isNearGround && isVerticalSlow && isHorizontalSlow) {
+            ball.framesNearGround++;
+            if (ball.framesNearGround > 15 && !ball.hasLanded) {
+                ball.hasLanded = true;
+                ball.landedTime = Date.now();
+                // Snap to ground
+                ball.body.position.y = radius;
+                ball.body.velocity.set(0, 0, 0);
+                console.log(`${ball.props.name} landed after ${ball.framesNearGround} frames!`);
+            }
+        } else {
+            ball.framesNearGround = 0;
         }
     });
 
+    // Stop simulation when all balls have landed
     if (allLanded && isDropping) {
         isDropping = false;
         console.log('All balls landed - simulation stopped');
@@ -382,7 +403,7 @@ function animate() {
     animationId = requestAnimationFrame(animate);
 
     if (isReplaying && trajectoryData.length > 0) {
-        const replayFrame = trajectoryData[Math.min(replayIndex, trajectoryData.length - 1)];
+        const replayFrame = trajectoryData[Math.min(Math.floor(replayIndex), trajectoryData.length - 1)];
         if (replayFrame) {
             replayFrame.forEach((frameData, idx) => {
                 if (balls[idx] && balls[idx].mesh) {
@@ -419,8 +440,6 @@ function animate() {
     renderer.render(scene, camera);
 }
 
-let replayIndex = 0;
-
 function setupEventListeners() {
     console.log('Setting up event listeners...');
 
@@ -451,7 +470,6 @@ function setupEventListeners() {
         replaySpeed = parseFloat(e.target.value);
         speedValue.textContent = replaySpeed.toFixed(1);
         document.getElementById('replay-btn').textContent = '🎬 Replay (' + replaySpeed + 'x)';
-        // Update active button
         document.querySelectorAll('.speed-btn').forEach(btn => {
             btn.classList.toggle('active', parseFloat(btn.dataset.speed) === replaySpeed);
         });
