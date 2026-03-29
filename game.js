@@ -44,6 +44,7 @@ class Ball {
         this.startTime = Date.now();
         this.hasLanded = false;
         this.firstBounceHeight = 0;
+        this.landedTime = 0;
     }
 }
 
@@ -60,12 +61,12 @@ function init() {
     // Three.js scene setup
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87CEEB);
-    scene.fog = new THREE.Fog(0x87CEEB, 100, 500);
+    scene.fog = new THREE.Fog(0x87CEEB, 50, 200);
 
-    // Camera setup
-    camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
-    camera.position.set(0, 50, 150);
-    camera.lookAt(0, 30, 0);
+    // Camera setup - closer view for better visibility
+    camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 500);
+    camera.position.set(0, 25, 45);
+    camera.lookAt(0, 10, 0);
 
     // Renderer setup
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -108,14 +109,14 @@ function createGround() {
     groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
     world.addBody(groundBody);
 
-    const groundGeometry = new THREE.PlaneGeometry(300, 300);
+    const groundGeometry = new THREE.PlaneGeometry(200, 200);
     const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22, roughness: 0.8 });
     groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
     groundMesh.rotation.x = -Math.PI / 2;
     groundMesh.receiveShadow = true;
     scene.add(groundMesh);
 
-    const gridHelper = new THREE.GridHelper(300, 50, 0x000000, 0x000000);
+    const gridHelper = new THREE.GridHelper(200, 40, 0x000000, 0x000000);
     gridHelper.position.y = 0.01;
     gridHelper.material.opacity = 0.2;
     gridHelper.material.transparent = true;
@@ -131,13 +132,13 @@ function createPlatform(height) {
         scene.remove(platformMesh);
     }
 
-    const platformShape = new CANNON.Box(new CANNON.Vec3(8, 0.5, 8));
+    const platformShape = new CANNON.Box(new CANNON.Vec3(6, 0.5, 6));
     platformBody = new CANNON.Body({ mass: 0 });
     platformBody.addShape(platformShape);
     platformBody.position.set(0, height, 0);
     world.addBody(platformBody);
 
-    const platformGeometry = new THREE.BoxGeometry(16, 1, 16);
+    const platformGeometry = new THREE.BoxGeometry(12, 1, 12);
     const platformMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513, roughness: 0.9 });
     platformMesh = new THREE.Mesh(platformGeometry, platformMaterial);
     platformMesh.position.set(0, height, 0);
@@ -200,7 +201,7 @@ function clearAllBalls() {
 function addTrailPoint(ball) {
     if (!document.getElementById('show-trail').checked) return;
     
-    const geometry = new THREE.SphereGeometry(0.15, 6, 6);
+    const geometry = new THREE.SphereGeometry(0.12, 6, 6);
     const material = new THREE.MeshBasicMaterial({ 
         color: ball.props.color, 
         transparent: true, 
@@ -211,7 +212,7 @@ function addTrailPoint(ball) {
     scene.add(point);
     ball.trailPoints.push(point);
 
-    if (ball.trailPoints.length > 80) {
+    if (ball.trailPoints.length > 60) {
         const oldPoint = ball.trailPoints.shift();
         scene.remove(oldPoint);
     }
@@ -236,7 +237,7 @@ function applyWeatherForces() {
     const pressure = parseFloat(document.getElementById('pressure').value);
 
     balls.forEach(ball => {
-        if (!ball.body) return;
+        if (!ball.body || ball.hasLanded) return;
 
         if (document.getElementById('air-resistance').checked) {
             const airDensity = getAirDensity(temp, humidity, pressure);
@@ -258,10 +259,18 @@ function applyWeatherForces() {
     });
 }
 
+// Check if all balls have landed
+function allBallsLanded() {
+    if (balls.length === 0) return false;
+    return balls.every(ball => ball.hasLanded);
+}
+
 // Update statistics for all balls
 function updateStats() {
+    const allLanded = allBallsLanded();
+    
     balls.forEach(ball => {
-        if (!ball.body) return;
+        if (!ball.body || ball.hasLanded) return;
 
         const currentY = ball.body.position.y;
         const radius = ball.props.radius;
@@ -288,11 +297,19 @@ function updateStats() {
             ball.impactVelocity = Math.abs(ball.body.velocity.y);
         }
 
-        // Mark as landed
-        if (currentY <= radius + 0.05 && Math.abs(ball.body.velocity.y) < 0.1) {
+        // Mark as landed when ball stops moving near ground
+        if (currentY <= radius + 0.05 && Math.abs(ball.body.velocity.y) < 0.1 && !ball.hasLanded) {
             ball.hasLanded = true;
+            ball.landedTime = Date.now();
+            console.log(`${ball.props.name} landed!`);
         }
     });
+
+    // Stop simulation when all balls have landed
+    if (allLanded && isDropping) {
+        isDropping = false;
+        console.log('All balls landed - simulation stopped');
+    }
 
     renderStats();
     renderComparison();
@@ -307,14 +324,21 @@ function renderStats() {
     }
 
     let html = '';
-    const fallTime = isDropping ? ((Date.now() - startTime) / 1000).toFixed(2) : '0.00';
+    // Calculate fall time - stop counting when ball lands
+    const fallTime = balls.some(b => !b.hasLanded) 
+        ? ((Date.now() - startTime) / 1000).toFixed(2) 
+        : ((balls[0].landedTime || Date.now()) - startTime) / 1000).toFixed(2);
 
     balls.forEach((ball, index) => {
         const color = '#' + ball.props.color.toString(16).padStart(6, '0');
+        const ballFallTime = ball.hasLanded 
+            ? ((ball.landedTime - startTime) / 1000).toFixed(2)
+            : fallTime;
+        
         html += `
             <div class="stat-ball" style="border-left-color: ${color}">
                 <h4 style="color: ${color}">${ball.props.name}</h4>
-                <div class="stat-row"><span>Fall Time:</span><span>${fallTime} s</span></div>
+                <div class="stat-row"><span>Fall Time:</span><span>${ballFallTime} s</span></div>
                 <div class="stat-row"><span>Max Height:</span><span>${ball.maxHeight.toFixed(2)} m</span></div>
                 <div class="stat-row"><span>Bounces:</span><span>${ball.bounceCount}</span></div>
                 <div class="stat-row"><span>Impact Velocity:</span><span>${ball.impactVelocity.toFixed(2)} m/s</span></div>
@@ -336,7 +360,6 @@ function renderComparison() {
 
     // Find winners
     let highestBounce = { ball: null, value: 0 };
-    let fastestFall = { ball: null, value: Infinity };
     let mostBounces = { ball: null, value: 0 };
 
     balls.forEach(ball => {
@@ -381,7 +404,7 @@ function animate() {
         applyWeatherForces();
 
         balls.forEach(ball => {
-            if (ball.mesh && ball.body) {
+            if (ball.mesh && ball.body && !ball.hasLanded) {
                 ball.mesh.position.copy(ball.body.position);
                 ball.mesh.quaternion.copy(ball.body.quaternion);
 
@@ -486,7 +509,7 @@ function dropBalls() {
     clearAllBalls();
     
     const totalBalls = selectedOptions.length;
-    const spacing = Math.min(2, 10 / totalBalls);
+    const spacing = Math.min(1.5, 8 / totalBalls);
     const startX = -((totalBalls - 1) * spacing) / 2;
 
     selectedOptions.forEach((option, index) => {
