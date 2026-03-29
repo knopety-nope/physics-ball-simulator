@@ -16,6 +16,7 @@ let totalDistance = 0;
 let lastY = 0;
 let initialHeight = 0;
 let animationId = null;
+let impactVelocityRecorded = 0;
 
 // Ball properties database
 const ballProperties = {
@@ -30,25 +31,34 @@ const ballProperties = {
 
 // Initialize the scene
 function init() {
+    console.log('Initializing Physics Ball Simulator...');
+    
+    // Get container dimensions
+    const container = document.getElementById('canvas-container');
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    
+    console.log('Container size:', width, 'x', height);
+
     // Three.js scene setup
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87CEEB);
     scene.fog = new THREE.Fog(0x87CEEB, 100, 500);
 
-    // Camera setup
-    camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    // Camera setup - fixed aspect ratio
+    camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
     camera.position.set(0, 50, 100);
     camera.lookAt(0, 25, 0);
 
-    // Renderer setup
+    // Renderer setup - use container dimensions
     renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth * 0.7, window.innerHeight);
+    renderer.setSize(width, height);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    document.getElementById('canvas-container').appendChild(renderer.domElement);
+    container.appendChild(renderer.domElement);
 
     // Lighting
-    const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+    const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
     scene.add(ambientLight);
 
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
@@ -82,6 +92,8 @@ function init() {
     // Update ball info display
     updateBallInfo();
 
+    console.log('Initialization complete!');
+    
     // Start animation loop
     animate();
 }
@@ -162,12 +174,16 @@ function createPlatform(height) {
 
 // Create ball
 function createBall(ballType, height) {
+    console.log('Creating ball:', ballType, 'at height:', height);
+    
     // Remove existing ball
     if (ballBody) {
         world.removeBody(ballBody);
+        ballBody = null;
     }
     if (ballMesh) {
         scene.remove(ballMesh);
+        ballMesh = null;
     }
     clearTrail();
 
@@ -194,8 +210,11 @@ function createBall(ballType, height) {
         metalness: ballType === 'steel' ? 0.9 : 0.1
     });
     ballMesh = new THREE.Mesh(ballGeometry, ballMaterial);
+    ballMesh.position.copy(ballBody.position);
     ballMesh.castShadow = true;
     scene.add(ballMesh);
+
+    console.log('Ball created! Position:', ballBody.position.y);
 
     // Update ball properties display
     document.getElementById('prop-mass').textContent = props.mass + ' kg';
@@ -236,7 +255,6 @@ function addTrailPoint(position) {
 
 // Calculate air density based on weather
 function getAirDensity(temp, humidity, pressure) {
-    // Simplified air density calculation
     const tempK = temp + 273.15;
     const vaporPressure = humidity / 100 * 6.112 * Math.exp((17.67 * temp) / (temp + 243.5));
     const dryPressure = pressure * 100 - vaporPressure;
@@ -292,7 +310,7 @@ function updateStats() {
     lastY = currentY;
 
     // Detect bounces
-    if (currentY <= radius + 0.1 && ballBody.velocity.y < -0.5) {
+    if (currentY <= radius + 0.1 && Math.abs(ballBody.velocity.y) > 0.5) {
         bounceCount++;
     }
 
@@ -300,21 +318,20 @@ function updateStats() {
     const fallTime = isDropping ? (Date.now() - startTime) / 1000 : 0;
 
     // Calculate impact velocity (when near ground)
-    let impactVelocity = 0;
     if (currentY <= radius + 1) {
-        impactVelocity = Math.abs(ballBody.velocity.y);
+        impactVelocityRecorded = Math.abs(ballBody.velocity.y);
     }
 
     // Calculate energy loss
-    const initialEnergy = ballProperties[document.getElementById('ball-type').value].mass * 9.81 * initialHeight;
-    const currentEnergy = ballProperties[document.getElementById('ball-type').value].mass * 9.81 * maxHeight;
+    const initialEnergy = props.mass * 9.81 * initialHeight;
+    const currentEnergy = props.mass * 9.81 * maxHeight;
     const energyLoss = initialEnergy > 0 ? ((initialEnergy - currentEnergy) / initialEnergy * 100) : 0;
 
     // Update display
     document.getElementById('stat-height').textContent = initialHeight.toFixed(1) + ' m';
     document.getElementById('stat-fall-time').textContent = fallTime.toFixed(2) + ' s';
     document.getElementById('stat-bounce-height').textContent = maxHeight.toFixed(2) + ' m';
-    document.getElementById('stat-impact-velocity').textContent = impactVelocity.toFixed(2) + ' m/s';
+    document.getElementById('stat-impact-velocity').textContent = impactVelocityRecorded.toFixed(2) + ' m/s';
     document.getElementById('stat-bounce-count').textContent = bounceCount;
     document.getElementById('stat-total-distance').textContent = totalDistance.toFixed(2) + ' m';
     document.getElementById('stat-energy-loss').textContent = Math.max(0, energyLoss).toFixed(1) + '%';
@@ -324,7 +341,7 @@ function updateStats() {
 function animate() {
     animationId = requestAnimationFrame(animate);
 
-    if (!isPaused) {
+    if (!isPaused && isDropping) {
         // Step physics
         world.step(1 / 60);
 
@@ -336,8 +353,8 @@ function animate() {
             ballMesh.position.copy(ballBody.position);
             ballMesh.quaternion.copy(ballBody.quaternion);
 
-            // Add trail point
-            if (isDropping && trailPoints.length % 5 === 0) {
+            // Add trail point every 10 frames
+            if (trailPoints.length % 10 === 0) {
                 addTrailPoint(ballBody.position.clone());
             }
 
@@ -352,6 +369,8 @@ function animate() {
 
 // Setup event listeners
 function setupEventListeners() {
+    console.log('Setting up event listeners...');
+    
     // Ball type change
     document.getElementById('ball-type').addEventListener('change', updateBallInfo);
 
@@ -367,13 +386,29 @@ function setupEventListeners() {
 
     // Weather slider updates
     ['temperature', 'wind-speed', 'wind-direction', 'humidity', 'pressure'].forEach(id => {
-        document.getElementById(id).addEventListener('input', (e) => {
-            document.getElementById(id.replace('-', '-value').replace('speed', '-value').replace('direction', '-dir-value')).textContent = e.target.value;
-        });
+        const element = document.getElementById(id);
+        if (element) {
+            element.addEventListener('input', (e) => {
+                let valueId = id + '-value';
+                if (id === 'wind-speed') valueId = 'wind-value';
+                if (id === 'wind-direction') valueId = 'wind-dir-value';
+                const valueElement = document.getElementById(valueId);
+                if (valueElement) {
+                    valueElement.textContent = e.target.value;
+                }
+            });
+        }
     });
 
     // Drop button
-    document.getElementById('drop-btn').addEventListener('click', dropBall);
+    const dropBtn = document.getElementById('drop-btn');
+    console.log('Drop button found:', dropBtn !== null);
+    if (dropBtn) {
+        dropBtn.addEventListener('click', function() {
+            console.log('Drop button clicked!');
+            dropBall();
+        });
+    }
 
     // Reset button
     document.getElementById('reset-btn').addEventListener('click', resetSimulation);
@@ -383,6 +418,8 @@ function setupEventListeners() {
 
     // Window resize
     window.addEventListener('resize', onWindowResize);
+    
+    console.log('Event listeners setup complete!');
 }
 
 // Update ball info display
@@ -408,11 +445,18 @@ function getCurrentHeight() {
 
 // Drop ball
 function dropBall() {
-    if (isDropping) return;
+    console.log('dropBall() called, isDropping:', isDropping);
+    
+    if (isDropping) {
+        console.log('Already dropping, returning');
+        return;
+    }
 
     const ballType = document.getElementById('ball-type').value;
     const height = getCurrentHeight();
     initialHeight = height;
+
+    console.log('Dropping', ballType, 'from', height, 'm');
 
     // Reset stats
     maxHeight = 0;
@@ -420,6 +464,7 @@ function dropBall() {
     totalDistance = 0;
     lastY = height;
     startTime = Date.now();
+    impactVelocityRecorded = 0;
 
     // Create ball
     createBall(ballType, height);
@@ -428,6 +473,7 @@ function dropBall() {
     createPlatform(height);
 
     isDropping = true;
+    console.log('Ball drop started!');
 }
 
 // Reset simulation
@@ -441,6 +487,7 @@ function resetSimulation() {
     bounceCount = 0;
     totalDistance = 0;
     lastY = 0;
+    impactVelocityRecorded = 0;
 
     // Clear display
     document.getElementById('stat-fall-time').textContent = '0.00 s';
@@ -449,6 +496,7 @@ function resetSimulation() {
     document.getElementById('stat-bounce-count').textContent = '0';
     document.getElementById('stat-total-distance').textContent = '0 m';
     document.getElementById('stat-energy-loss').textContent = '0%';
+    document.getElementById('stat-height').textContent = '0 m';
 
     clearTrail();
 
@@ -461,19 +509,26 @@ function resetSimulation() {
         scene.remove(ballMesh);
         ballMesh = null;
     }
+    
+    console.log('Simulation reset!');
 }
 
 // Toggle pause
 function togglePause() {
     isPaused = !isPaused;
     document.getElementById('pause-btn').textContent = isPaused ? '▶️ Resume' : '⏸️ Pause';
+    console.log('Pause toggled:', isPaused);
 }
 
 // Window resize handler
 function onWindowResize() {
-    camera.aspect = (window.innerWidth * 0.7) / window.innerHeight;
+    const container = document.getElementById('canvas-container');
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    
+    camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth * 0.7, window.innerHeight);
+    renderer.setSize(width, height);
 }
 
 // Initialize on load
