@@ -18,7 +18,7 @@ let replayIndex = 0;
 // Camera tracking
 let cameraTargetY = 25;
 let cameraTargetZ = 45;
-const cameraLerpFactor = 0.05; // Smooth camera movement
+const cameraLerpFactor = 0.05;
 
 // Ball properties database
 const ballProperties = {
@@ -54,6 +54,7 @@ class Ball {
         this.firstBounceHeight = 0;
         this.landedTime = 0;
         this.framesNearGround = 0;
+        this.dropTime = Date.now();
     }
 }
 
@@ -189,7 +190,6 @@ function clearAllBalls() {
         ball.trailPoints = [];
     });
     balls = [];
-    // Reset camera target
     cameraTargetY = 25;
     cameraTargetZ = 45;
 }
@@ -272,7 +272,6 @@ function recordTrajectory() {
 function updateCamera() {
     if (!isDropping || balls.length === 0) return;
     
-    // Find the lowest ball (the one closest to ground)
     let lowestY = Infinity;
     let highestY = -Infinity;
     let centerX = 0;
@@ -288,31 +287,25 @@ function updateCamera() {
     
     centerX = balls.length > 0 ? centerX / balls.length : 0;
     
-    // Calculate target camera position
-    // Keep camera focused on the action - follow the lowest ball but keep some margin
     const spread = highestY - lowestY;
-    const margin = Math.max(10, spread * 1.5); // Keep all balls in view with margin
-    
-    // Target Y is between the balls, slightly above center
+    const margin = Math.max(10, spread * 1.5);
     const targetCenterY = (lowestY + highestY) / 2 + margin * 0.3;
-    cameraTargetY = Math.max(targetCenterY, 15); // Don't go below 15
+    cameraTargetY = Math.max(targetCenterY, 15);
     
-    // Target Z adjusts based on ball spread - zoom out if balls are spread apart
     cameraTargetZ = 45 + spread * 0.5;
-    cameraTargetZ = Math.min(Math.max(cameraTargetZ, 30), 80); // Clamp between 30 and 80
+    cameraTargetZ = Math.min(Math.max(cameraTargetZ, 30), 80);
     
-    // Smooth camera movement using lerp
     camera.position.y += (cameraTargetY - camera.position.y) * cameraLerpFactor;
     camera.position.z += (cameraTargetZ - camera.position.z) * cameraLerpFactor;
     camera.position.x += (centerX - camera.position.x) * cameraLerpFactor;
     
-    // Camera looks at a point slightly below the center of the balls
     const lookAtY = Math.max(lowestY - 5, 0);
     camera.lookAt(centerX, lookAtY, 0);
 }
 
 function updateStats() {
     const allLanded = allBallsLanded();
+    const currentTime = Date.now();
     
     balls.forEach(ball => {
         if (!ball.body || ball.hasLanded) return;
@@ -320,6 +313,7 @@ function updateStats() {
         const currentY = ball.body.position.y;
         const radius = ball.props.radius;
         const velocity = ball.body.velocity;
+        const timeSinceDrop = (currentTime - ball.dropTime) / 1000;
 
         // Track max height
         if (currentY > ball.maxHeight) {
@@ -343,23 +337,36 @@ function updateStats() {
             ball.impactVelocity = Math.abs(velocity.y);
         }
 
-        // Improved landing detection - ball near ground with low velocity for multiple frames
-        const isNearGround = currentY <= radius + 0.15;
-        const isVerticalSlow = Math.abs(velocity.y) < 0.5;
-        const isHorizontalSlow = Math.abs(velocity.x) < 0.3 && Math.abs(velocity.z) < 0.3;
+        // Robust landing detection with multiple conditions
+        const isNearGround = currentY <= radius + 0.3;
+        const isVerticalSlow = Math.abs(velocity.y) < 1.5;
+        const isHorizontalSlow = Math.abs(velocity.x) < 1.0 && Math.abs(velocity.z) < 1.0;
+        const totalSpeed = Math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2);
+        const isOverallSlow = totalSpeed < 1.5;
         
-        if (isNearGround && isVerticalSlow && isHorizontalSlow) {
+        // Count frames near ground with low velocity
+        if (isNearGround && isVerticalSlow && isHorizontalSlow && isOverallSlow) {
             ball.framesNearGround++;
-            if (ball.framesNearGround > 15 && !ball.hasLanded) {
-                ball.hasLanded = true;
-                ball.landedTime = Date.now();
-                // Snap to ground
-                ball.body.position.y = radius;
-                ball.body.velocity.set(0, 0, 0);
-                console.log(`${ball.props.name} landed after ${ball.framesNearGround} frames!`);
-            }
         } else {
             ball.framesNearGround = 0;
+        }
+        
+        // Land ball if:
+        // 1. Near ground for 6+ frames (~0.1s), OR
+        // 2. Near ground for 3+ frames AND very slow, OR  
+        // 3. Time limit exceeded (ball has been falling for max expected time)
+        const maxFallTime = (ball.height / 4.4) + 2; // sqrt(2h/g) + buffer
+        const isTimeLimitExceeded = timeSinceDrop > maxFallTime;
+        const isVerySlow = totalSpeed < 0.5 && ball.framesNearGround >= 3;
+        
+        if ((ball.framesNearGround >= 6 || isVerySlow || isTimeLimitExceeded) && !ball.hasLanded) {
+            ball.hasLanded = true;
+            ball.landedTime = currentTime;
+            // Snap to ground and zero all velocities
+            ball.body.position.y = radius;
+            ball.body.velocity.set(0, 0, 0);
+            ball.body.angularVelocity.set(0, 0, 0);
+            console.log(`${ball.props.name} landed! Frames: ${ball.framesNearGround}, Time: ${timeSinceDrop.toFixed(2)}s`);
         }
     });
 
@@ -389,7 +396,7 @@ function renderStats() {
     balls.forEach((ball) => {
         const color = '#' + ball.props.color.toString(16).padStart(6, '0');
         const ballFallTime = ball.hasLanded 
-            ? ((ball.landedTime - startTime) / 1000).toFixed(2)
+            ? ((ball.landedTime - ball.dropTime) / 1000).toFixed(2)
             : fallTime;
         
         html += `
@@ -485,9 +492,7 @@ function animate() {
             }
         });
 
-        // Update camera to follow falling balls
         updateCamera();
-
         updateStats();
     }
 
@@ -517,7 +522,6 @@ function setupEventListeners() {
         }
     });
 
-    // Replay speed control
     const speedSlider = document.getElementById('replay-speed');
     const speedValue = document.getElementById('speed-value');
     speedSlider.addEventListener('input', (e) => {
@@ -529,7 +533,6 @@ function setupEventListeners() {
         });
     });
 
-    // Speed preset buttons
     document.querySelectorAll('.speed-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const speed = parseFloat(btn.dataset.speed);
@@ -633,7 +636,6 @@ function dropBalls() {
 
     startTime = Date.now();
     isDropping = true;
-    // Reset camera position
     cameraTargetY = height / 2 + 10;
     cameraTargetZ = 45 + height * 0.1;
     camera.position.set(0, cameraTargetY, cameraTargetZ);
